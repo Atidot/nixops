@@ -95,6 +95,8 @@ rec {
           pysqlite
           datadog
           digital-ocean
+          hvac
+          gitpathlib
         ];
 
       # For "nix-build --run-env".

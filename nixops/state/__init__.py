@@ -10,8 +10,8 @@ def open(url):
     url = urlparse.urlparse(url)
     scheme = url.scheme
 
-    if scheme == "":
-        scheme = "sqlite3"
+    #if scheme == "":
+    scheme = "json"
 
     def raise_(ex):
         raise ex
