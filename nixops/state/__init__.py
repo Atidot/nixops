@@ -2,6 +2,7 @@ import urlparse
 import sys
 import sqlite3_file
 import json_file
+import vault_file
 
 class WrongStateSchemeException(Exception):
     pass
@@ -11,7 +12,7 @@ def open(url):
     scheme = url.scheme
 
     #if scheme == "":
-    scheme = "json"
+    scheme = "vault"
 
     def raise_(ex):
         raise ex
@@ -19,6 +20,8 @@ def open(url):
     switcher = {
         "sqlite3": lambda(url): sqlite3_file.StateFile(url.path),
         "json": lambda(url): json_file.JsonFile(url.path),
+        "vault": lambda(url): vault_file.VaultState(),
+
     }
 
     function = switcher.get(scheme, lambda(url): raise_(WrongStateSchemeException("Unknown state scheme!")))
