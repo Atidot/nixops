@@ -15,6 +15,61 @@ from uuid import uuid1 as gen_uuid
 
 import pdb
 
+testing_example = {u'schemaVersion': 0, u'deployments': {u'a68d5e78-b342-11e7-a07e-00e04c680200': {u'attributes': {u'nixExprs': u'["/home/talz/development/atidot/devops/vault/infrastructure.nix", "/home/talz/development/atidot/devops/vault/services.nix"]', u'description': u'nixops shared-kv state vault', u'configsPath': u'/nix/store/pzjaq66r8h8pq347i48h043q37sf9sh5-nixops-machines', u'name': u'vault_test'}, u'resources': {}}}}
+my_path='/home/talz/development/atidot/'
+ex_2 = {u'lease_id': u'', u'warnings': None, u'wrap_info': None, u'auth': None, u'lease_duration': 3600, u'request_id': u'04c8aacd-025b-3d4e-dc66-c35bf2537596', u'data': {u'baz': {u'schemaVersion': 0, u'deployments': {}}, u'lease': u'1h'}, u'renewable': False}
+
+def ff(my_string):
+    res = ""
+    for c in my_string: 
+        if c == "'":
+            res+="\""
+        else:
+            res+=c
+    return res
+
+def test2():
+    res = join_state_paths(strip_state_paths(ex_2,my_path),my_path)
+    print "before: "
+    print testing_example
+    print "after: "
+    print res
+    print (res == testing_example)
+
+
+def test():
+    res = join_state_paths(strip_state_paths(testing_example,my_path),my_path)
+    print "before: "
+    print testing_example
+    print "after: "
+    print res
+    print (res == testing_example)
+
+def strip_state_paths(state,path_to_strip):
+    new_state = copy.deepcopy(state)
+    deployments = new_state.get('deployments',[])
+    for depl in deployments:
+        nix_exprs = new_state['deployments'][depl]['attributes'].get('nixExprs',"[]")
+        new_nix_exprs = []
+        for expr in eval(nix_exprs):
+            new_expr = expr[len(path_to_strip):]
+            new_nix_exprs.append(new_expr)
+        new_state['deployments'][depl]['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
+    return new_state
+        
+def join_state_paths(state,path_to_add):
+    new_state = copy.deepcopy(state)
+    deployments = new_state.get('deployments',[])
+    for depl in deployments:
+        nix_exprs = new_state['deployments'][depl]['attributes'].get('nixExprs',"[]")
+        new_nix_exprs = []
+        for expr in eval(nix_exprs):
+            new_expr = os.path.join(path_to_add,expr)
+            new_nix_exprs.append(new_expr)
+
+        new_state['deployments'][depl]['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
+    return new_state
+
 def _subclasses(cls):
     sub = cls.__subclasses__()
     return [cls] if not sub else [g for s in sub for g in _subclasses(s)]
@@ -46,6 +101,7 @@ class TransactionalVaultFile:
         self._key = os.environ['VAULT_KEY']
         self._url = os.environ['VAULT_ADDR']
         self._nixops_base_secret = 'secret/atidot'
+        self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
 
         #TODO: verify vault address before connecting?
         #TODO: this line should be wrapped with an exception and print a message that we need the enviroment variables set correctly
@@ -59,7 +115,8 @@ class TransactionalVaultFile:
     def read(self):
         if self.nesting == 0:
             dep = self._vault_cli.read(self._nixops_base_secret)
-            return dep['data']['baz']
+            new_dep = join_state_paths(dep['data']['baz'],self._dir_to_strip)
+            return new_dep
         else:
             assert self.nesting > 0
             return self._current_state
@@ -72,7 +129,7 @@ class TransactionalVaultFile:
             fcntl.flock(self._lock_file, fcntl.LOCK_EX)
             self._ensure_db_exists()
             self.must_rollback = False
-            vault_data = self._vault_cli.read(self._nixops_base_secret)['data']['baz'] #TODO: replace with read, no access to the actual data if not thru read
+            vault_data = join_state_paths(self._vault_cli.read(self._nixops_base_secret)['data']['baz'],self._dir_to_strip) #TODO: replace with read, no access to the actual data if not thru read
             self._backup_state = copy.deepcopy(vault_data)
             self._current_state = copy.deepcopy(vault_data)
         self.nesting = self.nesting + 1
@@ -100,8 +157,8 @@ class TransactionalVaultFile:
 
     def _commit(self):
         assert self.nesting == 0
-        
-        self._vault_cli.write(self._nixops_base_secret,baz=self._current_state,lease='1h');
+        new_current_state = strip_state_paths(self._current_state,self._dir_to_strip)
+        self._vault_cli.write(self._nixops_base_secret,baz=new_current_state,lease='1h')
         
         self._backup_state  = None
         self._current_state = None
@@ -139,7 +196,6 @@ class VaultState(object):
 
     def query_deployments(self):
         """Return the UUIDs of all deployments in the database."""
-
         return self.db.read()["deployments"].keys()
 
     def get_all_deployments(self):
