@@ -17,8 +17,7 @@ import pdb
 
 testing_example = {u'schemaVersion': 0, u'deployments': {u'a68d5e78-b342-11e7-a07e-00e04c680200': {u'attributes': {u'nixExprs': u'["/home/talz/development/atidot/devops/vault/infrastructure.nix", "/home/talz/development/atidot/devops/vault/services.nix"]', u'description': u'nixops shared-kv state vault', u'configsPath': u'/nix/store/pzjaq66r8h8pq347i48h043q37sf9sh5-nixops-machines', u'name': u'vault_test'}, u'resources': {}}}}
 my_path='/home/talz/development/atidot/'
-ex_2 = {u'lease_id': u'', u'warnings': None, u'wrap_info': None, u'auth': None, u'lease_duration': 3600, u'request_id': u'04c8aacd-025b-3d4e-dc66-c35bf2537596', u'data': {u'baz': {u'schemaVersion': 0, u'deployments': {}}, u'lease': u'1h'}, u'renewable': False}
-
+ex_2 = {u'schemaVersion': 0, u'deployments': {}}
 def ff(my_string):
     res = ""
     for c in my_string: 
@@ -28,14 +27,17 @@ def ff(my_string):
             res+=c
     return res
 
+#- tests for path manipulation -#
+
 def test_path_manipulation():
     "checks on a state with empty deployments dict"
-    res = join_state_paths(strip_state_paths(ex_2,my_path),my_path)
+    stripped = strip_state_paths(ex_2,my_path)
+    res = join_state_paths(stripped,my_path)
     print "before: "
-    print testing_example
+    print ex_2
     print "after: "
     print res
-    print (res == testing_example)
+    print (res == ex_2)
 
 
 def test_path_manipulation2():
@@ -47,30 +49,36 @@ def test_path_manipulation2():
     print res
     print (res == testing_example)
 
+#- api for path manipulation -#
+
 def strip_state_paths(state,path_to_strip):
-    new_state = copy.deepcopy(state)
-    deployments = new_state.get('deployments',[])
-    for depl in deployments:
-        nix_exprs = new_state['deployments'][depl]['attributes'].get('nixExprs',"[]")
-        new_nix_exprs = []
-        for expr in eval(nix_exprs):
-            new_expr = expr[len(path_to_strip):]
-            new_nix_exprs.append(new_expr)
-        new_state['deployments'][depl]['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
-    return new_state
-        
+    return helper_accessor(state,path_to_strip,remove_path_prefix)
+
 def join_state_paths(state,path_to_add):
+    return helper_accessor(state,path_to_add,append_path_prefix)
+
+#- under the hood of path manipulation -#
+
+def remove_path_prefix(prefix,path):
+    return path[len(prefix):]
+
+def append_path_prefix(prefix,path):
+    return os.path.join(prefix,path)
+
+def helper_accessor(state,path,f):
     new_state = copy.deepcopy(state)
     deployments = new_state.get('deployments',[])
     for depl in deployments:
         nix_exprs = new_state['deployments'][depl]['attributes'].get('nixExprs',"[]")
         new_nix_exprs = []
         for expr in eval(nix_exprs):
-            new_expr = os.path.join(path_to_add,expr)
+            new_expr = f(path,expr)
             new_nix_exprs.append(new_expr)
 
         new_state['deployments'][depl]['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
     return new_state
+
+#############################################################
 
 def _subclasses(cls):
     sub = cls.__subclasses__()
@@ -80,7 +88,6 @@ class TransactionalVaultFile:
     """
         Transactional access to a Vault. hides under the json logical wrapper
     """
-
 
     # Implementation notes:
     # if self.nesting > 0, then no write will propagate.
