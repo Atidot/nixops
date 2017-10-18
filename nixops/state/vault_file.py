@@ -28,7 +28,8 @@ def ff(my_string):
             res+=c
     return res
 
-def test2():
+def test_path_manipulation():
+    "checks on a state with empty deployments dict"
     res = join_state_paths(strip_state_paths(ex_2,my_path),my_path)
     print "before: "
     print testing_example
@@ -37,7 +38,8 @@ def test2():
     print (res == testing_example)
 
 
-def test():
+def test_path_manipulation2():
+    "checks on a state with deployments"
     res = join_state_paths(strip_state_paths(testing_example,my_path),my_path)
     print "before: "
     print testing_example
