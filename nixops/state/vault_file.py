@@ -127,16 +127,32 @@ when ever we look for an uuid that is not in the dict, we will read from the vau
 and copy it into the dict. upon commit, we will remove it from the dict
 '''
     def read_depl(self,uuid): 
-        pass
+        if uuid not in self._deployments:
+            depl_key = self.read()["deployments"].get(uuid)
+            if depl_key is None:
+                raise Exception('deployment does not exists in vault at all!!!!!!!')
+            else:
+                depl = self._vault_cli.read(depl_key)['data']['baz']
+                if depl is None:
+                    raise Exception("illogical state - secret value does not exist, although it's key exists in deployments")
+                else:
+                    self._deployments[uuid] = depl
+        return self._deployments.get(uuid)
 
+            
     def commit_depl(self,uuid):
-        pass
+        assert self.nesting == 0
+        new_current_state = strip_state_paths(self._current_state,self._dir_to_strip)
+        self._vault_cli.write(self._nixops_base_secret,baz=self._deployments.pop(uuid),lease='1h')    
+        
 
     def read_all_depls(self,uuid):
+        for uuid in self.read()["deployments"]
+            read_depl(uuid)
+        return self._deployments
 
     def set_depl(self,depl,uuid):
-
-    def del_depl(self,uuid):
+        self._deployments[uuid] = depl
 
 ####
     
