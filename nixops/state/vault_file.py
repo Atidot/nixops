@@ -18,6 +18,7 @@ import pdb
 testing_example = {u'schemaVersion': 0, u'deployments': {u'a68d5e78-b342-11e7-a07e-00e04c680200': {u'attributes': {u'nixExprs': u'["/home/talz/development/atidot/devops/vault/infrastructure.nix", "/home/talz/development/atidot/devops/vault/services.nix"]', u'description': u'nixops shared-kv state vault', u'configsPath': u'/nix/store/pzjaq66r8h8pq347i48h043q37sf9sh5-nixops-machines', u'name': u'vault_test'}, u'resources': {}}}}
 my_path='/home/talz/development/atidot/'
 ex_2 = {u'schemaVersion': 0, u'deployments': {}}
+
 def ff(my_string):
     res = ""
     for c in my_string: 
@@ -109,7 +110,7 @@ class TransactionalVaultFile:
         self._root_token = os.environ['VAULT_TOKEN']
         self._key = os.environ['VAULT_KEY']
         self._url = os.environ['VAULT_ADDR']
-        self._nixops_base_secret = 'secret/atidot'
+        self._nixops_base_secret = 'secret/atidot/deployments'
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
 
         #TODO: verify vault address before connecting?
@@ -120,7 +121,25 @@ class TransactionalVaultFile:
         self.nesting = 0
         self.lock = threading.RLock()
 
+'''
+deployments are secrets, so now we hold them in a dict on memory.
+when ever we look for an uuid that is not in the dict, we will read from the vault
+and copy it into the dict. upon commit, we will remove it from the dict
+'''
+    def read_depl(self,uuid): 
+        pass
 
+    def commit_depl(self,uuid):
+        pass
+
+    def read_all_depls(self,uuid):
+
+    def set_depl(self,depl,uuid):
+
+    def del_depl(self,uuid):
+
+####
+    
     def read(self):
         if self.nesting == 0:
             dep = self._vault_cli.read(self._nixops_base_secret)
@@ -219,7 +238,9 @@ class VaultState(object):
         return res
 
     def _find_deployment(self, uuid=None):
-        all_deployments = self.db.read()["deployments"]
+        #all_deployments = self.db.read()["deployments"]
+        all_deployments = self.db.read_all_depls()
+        #read deployments 
         found = []
         if not uuid:
             found = all_deployments
@@ -254,32 +275,36 @@ class VaultState(object):
             uuid = str(uuid.uuid1())
         with self.db:
             state = self.db.read()
-            state["deployments"][uuid] = { "attributes": {}, "resources": {} }
+            new_empty_depl = { "attributes": {}, "resources": {} }
+            state["deployments"][uuid] = self.db._nixops_base_secret + "/" + uuid
             self.db.set(state)
+            self.db.set_depl(uuid,new_empty_depl)
         return nixops.deployment.Deployment(self, uuid, sys.stderr)
 
     def _delete_deployment(self, deployment_uuid):
         """NOTE: This is UNSAFE, it's guarded in nixops/deployment.py. Do not call this function except from there!"""
         #self.__db.execute("delete from Deployments where uuid = ?", (deployment_uuid,))
         with self.db:
-            state = self.db.read()
+            state = self.db.read_depl()
             state["deployments"].pop(deployment_uuid, None)
             self.db.set(state)
+            #TODO: note: this part only removes the secret from the main dataset, the deployment's secret in the vault or in the dict might still exist
 
     def clone_deployment(self, deployment_uuid):
         with self.db:
             if not uuid:
                 import uuid
                 new_uuid = str(uuid.uuid1())
-            state = self.db.read()
-
-            cloned_attributes = copy.deepcopy(state["deployments"][deployment_uuid]["attributes"])
-            state["deployments"][new_uuid] = {
+            cloned_attributes = copy.deepcopy(self.db.read_depl(deployment_uuid)["attributes"])
+            state["deployments"][new_uuid] = self.db._nixops_base_secret + "/" + new_uuid
+ 
+            cloned_depl = {
                 "attributes": cloned_attributes,
                 "resources": {}
             }
 
             self.db.set(state)
+            self.db.set_depl(new_uuid,cloned_depl)
 
         return self._find_deployment(new_uuid)
 
@@ -287,36 +312,38 @@ class VaultState(object):
         """Get all the resources for a certain deployment"""
         resources = {}
         with self.db:
-            state = self.db.read()
-            state_resources = state["deployments"][deployment.uuid]["resources"]
+            #state = self.db.read()
+            depl = self.db.read_depl(deployment.uuid)
+            state_resources = depl["resources"]
             for res_id, res in state_resources.items():
                 r = self._create_state(deployment, res["type"], res["name"], res_id)
                 resources[res["name"]] = r
-            self.db.set(state)
+            #self.db.set(state)
+            self.db.set_depl(depl)
         return resources
 
     def set_deployment_attrs(self, deployment_uuid, attrs):
         """Update deployment attributes in the state."""
         with self.db:
-            state = self.db.read()
-            for n, v in attrs.iteritems():
+            depl = self.db.read_depl(deployment_uuid)
+-            for n, v in attrs.iteritems():
                 if v == None:
-                    state["deployments"][deployment_uuid]["attributes"].pop(n,None)
+                    depl["attributes"].pop(n,None)
                 else:
-                    state["deployments"][deployment_uuid]["attributes"][n] = v
-            self.db.set(state)
+                    depl["attributes"][n] = v
+            self.db.set_depl(deployment_uuid,depl)
 
     def del_deployment_attr(self, deployment_uuid, attr_name):
         with self.db:
-            state = self.db.read()
-            state["deployments"][deployment_uuid]["attributes"].pop(attr_name,None)
-            self.db.set(state)
+            depl = self.db.read_depl(deployment_uuid)
+            depl["attributes"].pop(attr_name,None)
+            self.db.set_depl(deployment_uuid,depl)
 
     def get_deployment_attr(self, deployment_uuid, name):
         """Get a deployment attribute from the state."""
         with self.db:
-            state = self.db.read()
-            result = state["deployments"][deployment_uuid]["attributes"].get(name)
+            depl = self.db.read_depl(deployment_uuid)
+            result = depl["attributes"].get(name)
             if result:
                 return result
             else:
@@ -324,9 +351,10 @@ class VaultState(object):
 
     def get_all_deployment_attrs(self, deployment_uuid):
         with self.db:
-            state = self.db.read()
-            return copy.deepcopy(state["deployments"][deployment_uuid]["attributes"])
+            depl = self.db.read_depl(deployment_uuid)
+            return copy.deepcopy(depl["attributes"])
 
+    #TODO: i dont know if this code is relevant anymore
     def get_deployment_lock(self, deployment):
         lock_dir = os.environ.get("HOME", "") + "/.nixops/locks"
         if not os.path.exists(lock_dir): os.makedirs(lock_dir, 0700)
@@ -356,65 +384,67 @@ class VaultState(object):
 
     def create_resource(self, deployment, name, type):
         with self.db:
-            state = self.db.read()
-            if name in state["deployments"][deployment.uuid]["resources"]:
+            depl = self.db.read_depl(deployment.uuid)
+
+            if name in depl["resources"]:
                 raise Exception("resource already exists in database!")
             id = str(gen_uuid())
-            state["deployments"][deployment.uuid]["resources"][id] = {
+            depl["resources"][id] = {
                     "name": name,
                     "type" : type,
                     "attributes" : {}
             }
-            self.db.set(state)
+            #self.db.set(state)
+            self.db.set_depl(deployment.uuid,depl)
             r = self._create_state(deployment, type, name, id)
             return r
-
+        
     def delete_resource(self, deployment_uuid, res_id):
         with self.db:
-            state = self.db.read()
+            depl = self.db.read_depl(deployment_uuid)
             state["deployments"][deployment_uuid]["resources"].pop(res_id)
-            self.db.set(state)
+            self.db.set_depl(deployment_uuid,depl)
 
     def _rename_resource(self, deployment_uuid, resource_id, new_name):
         """NOTE: Invariants are checked in nixops/deployment.py#rename"""
         with self.db:
-            state = self.db.read()
-            state["deployments"][deployment_uuid]["resources"][resource_id]["name"] = new_name
-            self.db.set(state)
+            depl = self.db.read_depl(deployment_uuid)
+            depl["resources"][resource_id]["name"] = new_name
+            self.db.set_depl(deployment_uuid,depl)
 
     def set_resource_attrs(self, deployment_uuid, resource_id, attrs):
         with self.db:
-            state = self.db.read()
-            resource_attrs = state["deployments"][deployment_uuid]["resources"][resource_id]["attributes"]
+            depl = self.db.read_depl(deployment_uuid)
+            resource_attrs = depl["resources"][resource_id]["attributes"]
             for n, v in attrs.iteritems():
                 if v == None:
                     resource_attrs.pop(n, None)
                 else:
                     resource_attrs[n] = v
-            state["deployments"][deployment_uuid]["resources"][resource_id]["attributes"] = resource_attrs
-            self.db.set(state)
+            depl["resources"][resource_id]["attributes"] = resource_attrs
+            self.db.set_depl(deployment_uuid,depl)
 
     def del_resource_attr(self, deployment_uuid, resource_id, name):
         with self.db:
-            state = self.db.read()
-            resource_attrs = state["deployments"][deployment_uuid]["resources"][resource_id]["attributes"]
+            depl = self.db.read_depl(deployment_uuid)
+            resource_attrs = depl["resources"][resource_id]["attributes"]
             resource_attrs.pop(name, None)
-            state["deployments"][deployment_uuid]["resources"][resource_id]["attributes"] = resource_attrs
-            self.db.set(state)
-
+            depl["resources"][resource_id]["attributes"] = resource_attrs
+            self.db.set_depl(deployment_uuid,depl)
+            
     def get_resource_attr(self, deployment_uuid, resource_id, name):
         """Get a machine attribute from the state file."""
         with self.db:
-            state = self.db.read()
-            resource_attrs = state["deployments"][deployment_uuid]["resources"][resource_id]["attributes"]
+            depl = self.db.read_depl(deployment_uuid)
+            resource_attrs = depl["resources"][resource_id]["attributes"]
             res = resource_attrs.get(name)
             if res != None: return res
             return nixops.util.undefined
 
     def get_all_resource_attrs(self, deployment_uuid, resource_id):
         with self.db:
-            state = self.db.read()
-            resource_attrs = state["deployments"][deployment_uuid]["resources"][resource_id]["attributes"]
+            depl = self.db.read_depl(deployment_uuid)
+            resource_attrs = depl["resources"][resource_id]["attributes"]
             return copy.deepcopy(resource_attrs)
 
     ### STATE
