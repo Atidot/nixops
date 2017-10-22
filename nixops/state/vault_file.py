@@ -58,6 +58,13 @@ def strip_state_paths(state,path_to_strip):
 def join_state_paths(state,path_to_add):
     return helper_accessor(state,path_to_add,append_path_prefix)
 
+def strip_depl_paths(depl,path_to_strip):
+    return helper_accessor(depl,path_to_strip,remove_path_prefix)
+
+def join_depl_paths(depl,path_to_add):
+    return helper_accessor(depl,path_to_add,append_path_prefix)
+
+
 #- under the hood of path manipulation -#
 
 def remove_path_prefix(prefix,path):
@@ -75,9 +82,19 @@ def helper_accessor(state,path,f):
         for expr in eval(nix_exprs):
             new_expr = f(path,expr)
             new_nix_exprs.append(new_expr)
-
         new_state['deployments'][depl]['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
     return new_state
+
+def depl_helper_accessor(depl,path,f):
+    new_depl = copy.deepcopy(depl)
+    nix_exprs = new_depl['attributes'].get('nixExprs',"[]")
+    new_nix_exprs = []
+    for expr in eval(nix_exprs):
+        new_expr = f(path,expr)
+        new_nix_exprs.append(new_expr)
+    new_depl['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
+    return new_depl
+
 
 #############################################################
 
@@ -99,7 +116,6 @@ class TransactionalVaultFile:
            2. VAULT_KEY to be the vault's unseal key
            3. VAULT_ADDR to the address of vault (if vault is initialized on the same machine, it is supposed to be set 
         """
-
         # we create lock in ~/nixops/locks/atidot-shared-state
         lock_dir = os.path.join(os.environ.get("HOME", ""), ".nixops/locks")
         if not os.path.exists(lock_dir): os.makedirs(lock_dir, 0700)
@@ -120,47 +136,51 @@ class TransactionalVaultFile:
         self._vault_cli = vault
         self.nesting = 0
         self.lock = threading.RLock()
+        self._deployments = {}
 
-'''
-deployments are secrets, so now we hold them in a dict on memory.
-when ever we look for an uuid that is not in the dict, we will read from the vault
-and copy it into the dict. upon commit, we will remove it from the dict
-'''
-    def read_depl(self,uuid): 
+#'''
+#deployments are secrets, so now we hold them in a dict on memory.
+#when ever we look for an uuid that is not in the dict, we will read from the vault
+#and copy it into the dict. upon commit, we will remove it from the dict
+#'''
+
+    def read_depl(self,uuid):
         if uuid not in self._deployments:
             depl_key = self.read()["deployments"].get(uuid)
             if depl_key is None:
                 raise Exception('deployment does not exists in vault at all!!!!!!!')
             else:
-                depl = self._vault_cli.read(depl_key)['data']['baz']
+                depl = self._vault_cli.read(depl_key)
                 if depl is None:
                     raise Exception("illogical state - secret value does not exist, although it's key exists in deployments")
                 else:
-                    self._deployments[uuid] = depl
+                    self._deployments[uuid] = join_depl_paths(depl['data']['baz'],self._dir_to_strip)
         return self._deployments.get(uuid)
 
             
     def commit_depl(self,uuid):
-        assert self.nesting == 0
-        new_current_state = strip_state_paths(self._current_state,self._dir_to_strip)
-        self._vault_cli.write(self._nixops_base_secret,baz=self._deployments.pop(uuid),lease='1h')    
+        stripped_depl = strip_depl_paths(self._deployments[uuid],self._dir_to_strip)
+        depl_key = self._nixops_base_secret + "/" + uuid
+        self._vault_cli.write(depl_key,baz=stripped_depl,lease='1h')    
         
 
-    def read_all_depls(self,uuid):
-        for uuid in self.read()["deployments"]
-            read_depl(uuid)
+    def read_all_depls(self):
+        for uuid in self.read()["deployments"]:
+            self.read_depl(uuid)
         return self._deployments
 
-    def set_depl(self,depl,uuid):
+    def set_depl(self,uuid,depl):
         self._deployments[uuid] = depl
 
+    def set_deployments(self,deployments):
+        self._deployments = deployments
+        
 ####
     
     def read(self):
         if self.nesting == 0:
-            dep = self._vault_cli.read(self._nixops_base_secret)
-            new_dep = join_state_paths(dep['data']['baz'],self._dir_to_strip)
-            return new_dep
+            depl = self._vault_cli.read(self._nixops_base_secret)
+            return depl['data']['baz']
         else:
             assert self.nesting > 0
             return self._current_state
@@ -173,9 +193,10 @@ and copy it into the dict. upon commit, we will remove it from the dict
             fcntl.flock(self._lock_file, fcntl.LOCK_EX)
             self._ensure_db_exists()
             self.must_rollback = False
-            vault_data = join_state_paths(self._vault_cli.read(self._nixops_base_secret)['data']['baz'],self._dir_to_strip) #TODO: replace with read, no access to the actual data if not thru read
+            vault_data = self._vault_cli.read(self._nixops_base_secret)['data']['baz'] #TODO: replace with read, no access to the actual data if not thru read
             self._backup_state = copy.deepcopy(vault_data)
             self._current_state = copy.deepcopy(vault_data)
+
         self.nesting = self.nesting + 1
 
     def __exit__(self, exception_type, exception_value, exception_traceback):
@@ -194,6 +215,7 @@ and copy it into the dict. upon commit, we will remove it from the dict
     def _rollback(self):
         self._backup_state  = None
         self._current_state = None
+        self._deployments.clear()
         pass
 
     def set(self, state):
@@ -201,12 +223,16 @@ and copy it into the dict. upon commit, we will remove it from the dict
 
     def _commit(self):
         assert self.nesting == 0
-        new_current_state = strip_state_paths(self._current_state,self._dir_to_strip)
-        self._vault_cli.write(self._nixops_base_secret,baz=new_current_state,lease='1h')
-        
+        self._vault_cli.write(self._nixops_base_secret,baz=self._current_state,lease='1h')
+
+        #commit also the deployments:
+        for uuid in self._deployments:
+            self.commit_depl(uuid)
+
         self._backup_state  = None
         self._current_state = None
-
+        self._deployments.clear()
+        
     def _ensure_db_exists(self):
         res = self._vault_cli.read(self._nixops_base_secret);
         if res is None:
@@ -217,7 +243,8 @@ and copy it into the dict. upon commit, we will remove it from the dict
             self._vault_cli.write(self._nixops_base_secret,baz=initial_db,lease='1h');
 
     def schema_version(self): #TODO: resolve this after deciding on format for this stuffush
-        version = self.read()["schemaVersion"]
+        state = self.read()
+        version = state["schemaVersion"]
         if version is None:
             raise "illegal vault server" #TODO: proper exception
         else:
@@ -226,7 +253,7 @@ and copy it into the dict. upon commit, we will remove it from the dict
 class VaultState(object):
     """NixOps state file."""
 
-    def __init__(self):                                                          
+    def __init__(self):
         self.db = TransactionalVaultFile()
         self.vault_url = self.db._url
         # Check that we're not using a to new DB schema version.
@@ -254,9 +281,7 @@ class VaultState(object):
         return res
 
     def _find_deployment(self, uuid=None):
-        #all_deployments = self.db.read()["deployments"]
         all_deployments = self.db.read_all_depls()
-        #read deployments 
         found = []
         if not uuid:
             found = all_deployments
@@ -295,15 +320,20 @@ class VaultState(object):
             state["deployments"][uuid] = self.db._nixops_base_secret + "/" + uuid
             self.db.set(state)
             self.db.set_depl(uuid,new_empty_depl)
+
         return nixops.deployment.Deployment(self, uuid, sys.stderr)
 
     def _delete_deployment(self, deployment_uuid):
         """NOTE: This is UNSAFE, it's guarded in nixops/deployment.py. Do not call this function except from there!"""
         #self.__db.execute("delete from Deployments where uuid = ?", (deployment_uuid,))
         with self.db:
-            state = self.db.read_depl()
-            state["deployments"].pop(deployment_uuid, None)
+            state = self.db.read()
+            depl = self.db.read_depl(deployment_uuid)
+            depl_key = state["deployments"].pop(deployment_uuid)
+            self.db._deployments.pop(deployment_uuid, None)
+            self.db._vault_cli.delete(depl_key) # deletes the deployment from the vault
             self.db.set(state)
+            
             #TODO: note: this part only removes the secret from the main dataset, the deployment's secret in the vault or in the dict might still exist
 
     def clone_deployment(self, deployment_uuid):
@@ -328,21 +358,19 @@ class VaultState(object):
         """Get all the resources for a certain deployment"""
         resources = {}
         with self.db:
-            #state = self.db.read()
             depl = self.db.read_depl(deployment.uuid)
             state_resources = depl["resources"]
             for res_id, res in state_resources.items():
                 r = self._create_state(deployment, res["type"], res["name"], res_id)
                 resources[res["name"]] = r
-            #self.db.set(state)
-            self.db.set_depl(depl)
+            self.db.set_depl(deployment.uuid,depl)
         return resources
 
     def set_deployment_attrs(self, deployment_uuid, attrs):
         """Update deployment attributes in the state."""
         with self.db:
             depl = self.db.read_depl(deployment_uuid)
--            for n, v in attrs.iteritems():
+            for n, v in attrs.iteritems():
                 if v == None:
                     depl["attributes"].pop(n,None)
                 else:
@@ -393,6 +421,7 @@ class VaultState(object):
             def __exit__(self, exception_type, exception_value, exception_traceback):
                 if self._lock_file:
                     self._lock_file.close()
+                
         return DeploymentLock(deployment.logger, lock_file_path)
 
     ###############################################################################################
@@ -418,7 +447,7 @@ class VaultState(object):
     def delete_resource(self, deployment_uuid, res_id):
         with self.db:
             depl = self.db.read_depl(deployment_uuid)
-            state["deployments"][deployment_uuid]["resources"].pop(res_id)
+            depl["resources"].pop(res_id)
             self.db.set_depl(deployment_uuid,depl)
 
     def _rename_resource(self, deployment_uuid, resource_id, new_name):
