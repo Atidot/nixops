@@ -96,7 +96,6 @@ rec {
           datadog
           digital-ocean
           hvac
-          gitpathlib
         ];
 
       # For "nix-build --run-env".
