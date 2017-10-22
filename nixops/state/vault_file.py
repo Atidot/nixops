@@ -17,18 +17,20 @@ import pdb
 
 #- api for path manipulation -#
 
-def strip_state_paths(state,path_to_strip):
-    return helper_accessor(state,path_to_strip,remove_path_prefix)
-
-def join_state_paths(state,path_to_add):
-    return helper_accessor(state,path_to_add,append_path_prefix)
-
 def strip_depl_paths(depl,path_to_strip):
-    return helper_accessor(depl,path_to_strip,remove_path_prefix)
+    return depl_helper_accessor(depl,path_to_strip,remove_path_prefix)
 
 def join_depl_paths(depl,path_to_add):
-    return helper_accessor(depl,path_to_add,append_path_prefix)
+    return depl_helper_accessor(depl,path_to_add,append_path_prefix)
 
+def switch_quotes(string): #replaces single quotes nested in the string with double quotes
+    res = ""
+    for c in string:
+        if c =="'":
+            res+="\""
+        else:
+            res+=c
+    return res
 
 #- under the hood of path manipulation -#
 
@@ -38,18 +40,6 @@ def remove_path_prefix(prefix,path):
 def append_path_prefix(prefix,path):
     return os.path.join(prefix,path)
 
-def helper_accessor(state,path,f):
-    new_state = copy.deepcopy(state)
-    deployments = new_state.get('deployments',[])
-    for depl in deployments:
-        nix_exprs = new_state['deployments'][depl]['attributes'].get('nixExprs',"[]")
-        new_nix_exprs = []
-        for expr in eval(nix_exprs):
-            new_expr = f(path,expr)
-            new_nix_exprs.append(new_expr)
-        new_state['deployments'][depl]['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
-    return new_state
-
 def depl_helper_accessor(depl,path,f):
     new_depl = copy.deepcopy(depl)
     nix_exprs = new_depl['attributes'].get('nixExprs',"[]")
@@ -57,7 +47,7 @@ def depl_helper_accessor(depl,path,f):
     for expr in eval(nix_exprs):
         new_expr = f(path,expr)
         new_nix_exprs.append(new_expr)
-    new_depl['attributes']['nixExprs'] = ff(unicode(repr(new_nix_exprs)))
+    new_depl['attributes']['nixExprs'] = switch_quotes(unicode(repr(new_nix_exprs)))
     return new_depl
 
 
@@ -92,7 +82,6 @@ class TransactionalVaultFile:
         self._key = os.environ['VAULT_KEY']
         self._url = os.environ['VAULT_ADDR']
         self._nixops_base_secret = 'secret/' + os.environ["NIXOPS_SECRET_KEY"]
-        print "key root",self._nixops_base_secret
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
 
         #TODO: verify vault address before connecting?
@@ -207,6 +196,7 @@ class TransactionalVaultFile:
               "deployments": {}
             }
             self._vault_cli.write(self._nixops_base_secret,baz=initial_db,lease='1h');
+        
 
     def schema_version(self): #TODO: resolve this after deciding on format for this stuffush
         state = self.read()
