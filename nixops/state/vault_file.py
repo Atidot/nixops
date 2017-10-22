@@ -15,41 +15,6 @@ from uuid import uuid1 as gen_uuid
 
 import pdb
 
-testing_example = {u'schemaVersion': 0, u'deployments': {u'a68d5e78-b342-11e7-a07e-00e04c680200': {u'attributes': {u'nixExprs': u'["/home/talz/development/atidot/devops/vault/infrastructure.nix", "/home/talz/development/atidot/devops/vault/services.nix"]', u'description': u'nixops shared-kv state vault', u'configsPath': u'/nix/store/pzjaq66r8h8pq347i48h043q37sf9sh5-nixops-machines', u'name': u'vault_test'}, u'resources': {}}}}
-my_path='/home/talz/development/atidot/'
-ex_2 = {u'schemaVersion': 0, u'deployments': {}}
-
-def ff(my_string):
-    res = ""
-    for c in my_string: 
-        if c == "'":
-            res+="\""
-        else:
-            res+=c
-    return res
-
-#- tests for path manipulation -#
-
-def test_path_manipulation():
-    "checks on a state with empty deployments dict"
-    stripped = strip_state_paths(ex_2,my_path)
-    res = join_state_paths(stripped,my_path)
-    print "before: "
-    print ex_2
-    print "after: "
-    print res
-    print (res == ex_2)
-
-
-def test_path_manipulation2():
-    "checks on a state with deployments"
-    res = join_state_paths(strip_state_paths(testing_example,my_path),my_path)
-    print "before: "
-    print testing_example
-    print "after: "
-    print res
-    print (res == testing_example)
-
 #- api for path manipulation -#
 
 def strip_state_paths(state,path_to_strip):
@@ -116,17 +81,18 @@ class TransactionalVaultFile:
            2. VAULT_KEY to be the vault's unseal key
            3. VAULT_ADDR to the address of vault (if vault is initialized on the same machine, it is supposed to be set 
         """
-        # we create lock in ~/nixops/locks/atidot-shared-state
+        # we create lock in ~/nixops/locks/shared-state
         lock_dir = os.path.join(os.environ.get("HOME", ""), ".nixops/locks")
         if not os.path.exists(lock_dir): os.makedirs(lock_dir, 0700)
-        lock_file_path = os.path.join(lock_dir,"atidot-shared-state")
+        lock_file_path = os.path.join(lock_dir,"shared-state")
         self._lock_file = open(lock_file_path, "w")
         fcntl.fcntl(self._lock_file, fcntl.F_SETFD, fcntl.FD_CLOEXEC) # to not keep the lock in child processes
         
         self._root_token = os.environ['VAULT_TOKEN']
         self._key = os.environ['VAULT_KEY']
         self._url = os.environ['VAULT_ADDR']
-        self._nixops_base_secret = 'secret/atidot/deployments'
+        self._nixops_base_secret = 'secret/' + os.environ["NIXOPS_SECRET_KEY"]
+        print "key root",self._nixops_base_secret
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
 
         #TODO: verify vault address before connecting?
