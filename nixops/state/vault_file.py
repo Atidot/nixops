@@ -116,14 +116,14 @@ class TransactionalVaultFile:
                 if depl is None:
                     raise Exception("illogical state - secret value does not exist, although it's key exists in deployments")
                 else:
-                    self._deployments[uuid] = join_depl_paths(depl['data']['baz'],self._dir_to_strip)
+                    self._deployments[uuid] = join_depl_paths(depl['data']['value'],self._dir_to_strip)
         return self._deployments.get(uuid)
 
             
     def commit_depl(self,uuid):
         stripped_depl = strip_depl_paths(self._deployments[uuid],self._dir_to_strip)
         depl_key = self._nixops_base_secret + "/" + uuid
-        self._vault_cli.write(depl_key,baz=stripped_depl,lease='1h')    
+        self._vault_cli.write(depl_key,value=stripped_depl,lease='1h')    
         
 
     def read_all_depls(self):
@@ -142,7 +142,7 @@ class TransactionalVaultFile:
     def read(self):
         if self.nesting == 0:
             depl = self._vault_cli.read(self._nixops_base_secret)
-            return depl['data']['baz']
+            return depl['data']['value']
         else:
             assert self.nesting > 0
             return self._current_state
@@ -155,7 +155,7 @@ class TransactionalVaultFile:
             fcntl.flock(self._lock_file, fcntl.LOCK_EX)
             self._ensure_db_exists()
             self.must_rollback = False
-            vault_data = self._vault_cli.read(self._nixops_base_secret)['data']['baz'] #TODO: replace with read, no access to the actual data if not thru read
+            vault_data = self._vault_cli.read(self._nixops_base_secret)['data']['value'] #TODO: replace with read, no access to the actual data if not thru read
             self._backup_state = copy.deepcopy(vault_data)
             self._current_state = copy.deepcopy(vault_data)
 
@@ -185,7 +185,7 @@ class TransactionalVaultFile:
 
     def _commit(self):
         assert self.nesting == 0
-        self._vault_cli.write(self._nixops_base_secret,baz=self._current_state,lease='1h')
+        self._vault_cli.write(self._nixops_base_secret,value=self._current_state,lease='1h')
 
         #commit also the deployments:
         for uuid in self._deployments:
@@ -202,7 +202,7 @@ class TransactionalVaultFile:
               "schemaVersion": 0,
               "deployments": {}
             }
-            self._vault_cli.write(self._nixops_base_secret,baz=initial_db,lease='1h');
+            self._vault_cli.write(self._nixops_base_secret,value=initial_db,lease='1h');
         
 
     def schema_version(self): #TODO: resolve this after deciding on format for this stuffush
