@@ -79,19 +79,26 @@ class TransactionalVaultFile:
         fcntl.fcntl(self._lock_file, fcntl.F_SETFD, fcntl.FD_CLOEXEC) # to not keep the lock in child processes
         
         self._root_token = os.environ['VAULT_TOKEN']
-        self._key = os.environ['VAULT_KEY']
         self._url = os.environ['VAULT_ADDR']
         self._nixops_base_secret = 'secret/' + os.environ["NIXOPS_SECRET_KEY"]
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
 
+        # this part appends '/' to the result, because if it used in concatenation (later) without it, it causes state corruption
+        if self._dir_to_strip[-1] != '/':
+            self._dir_to_strip += '/'
+
         #TODO: verify vault address before connecting?
         #TODO: this line should be wrapped with an exception and print a message that we need the enviroment variables set correctly
-        vault = hvac.Client(url=os.environ['VAULT_ADDR'], token=os.environ['VAULT_TOKEN'])
+        vault = hvac.Client(url=self._url, token=self._root_token)
             
         self._vault_cli = vault
         self.nesting = 0
         self.lock = threading.RLock()
         self._deployments = {}
+
+        if vault.is_sealed():
+            raise Exception('The supplied vault is sealed, please open it manually before running Nixops')
+        
 
 #'''
 #deployments are secrets, so now we hold them in a dict on memory.
