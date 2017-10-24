@@ -82,7 +82,7 @@ class TransactionalVaultFile:
         self._url = os.environ['VAULT_ADDR']
         self._nixops_base_secret = 'secret/' + os.environ["NIXOPS_SECRET_KEY"]
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
-
+        
         # this part appends '/' to the result, because if it used in concatenation (later) without it, it causes state corruption
         if self._dir_to_strip[-1] != '/':
             self._dir_to_strip += '/'
@@ -91,13 +91,13 @@ class TransactionalVaultFile:
         #TODO: this line should be wrapped with an exception and print a message that we need the enviroment variables set correctly
         vault = hvac.Client(url=self._url, token=self._root_token)
             
-        self._vault_cli = vault
+        self._db_file = vault
         self.nesting = 0
         self.lock = threading.RLock()
         self._deployments = {}
 
         if vault.is_sealed():
-            raise Exception('The supplied vault is sealed, please open it manually before running Nixops')
+            raise Exception('The supplied vault is sealed, please open it manually before running NixOps')
         
 
 #'''
@@ -112,7 +112,7 @@ class TransactionalVaultFile:
             if depl_key is None:
                 raise Exception('deployment does not exists in vault at all!!!!!!!')
             else:
-                depl = self._vault_cli.read(depl_key)
+                depl = self._db_file.read(depl_key)
                 if depl is None:
                     raise Exception("illogical state - secret value does not exist, although it's key exists in deployments")
                 else:
@@ -123,7 +123,7 @@ class TransactionalVaultFile:
     def commit_depl(self,uuid):
         stripped_depl = strip_depl_paths(self._deployments[uuid],self._dir_to_strip)
         depl_key = self._nixops_base_secret + "/" + uuid
-        self._vault_cli.write(depl_key,value=stripped_depl,lease='1h')    
+        self._db_file.write(depl_key,value=stripped_depl,lease='1h')    
         
 
     def read_all_depls(self):
@@ -141,7 +141,7 @@ class TransactionalVaultFile:
     
     def read(self):
         if self.nesting == 0:
-            depl = self._vault_cli.read(self._nixops_base_secret)
+            depl = self._db_file.read(self._nixops_base_secret)
             return depl['data']['value']
         else:
             assert self.nesting > 0
@@ -155,7 +155,7 @@ class TransactionalVaultFile:
             fcntl.flock(self._lock_file, fcntl.LOCK_EX)
             self._ensure_db_exists()
             self.must_rollback = False
-            vault_data = self._vault_cli.read(self._nixops_base_secret)['data']['value'] #TODO: replace with read, no access to the actual data if not thru read
+            vault_data = self._db_file.read(self._nixops_base_secret)['data']['value'] #TODO: replace with read, no access to the actual data if not thru read
             self._backup_state = copy.deepcopy(vault_data)
             self._current_state = copy.deepcopy(vault_data)
 
@@ -185,7 +185,7 @@ class TransactionalVaultFile:
 
     def _commit(self):
         assert self.nesting == 0
-        self._vault_cli.write(self._nixops_base_secret,value=self._current_state,lease='1h')
+        self._db_file.write(self._nixops_base_secret,value=self._current_state,lease='1h')
 
         #commit also the deployments:
         for uuid in self._deployments:
@@ -196,13 +196,13 @@ class TransactionalVaultFile:
         self._deployments.clear()
         
     def _ensure_db_exists(self):
-        res = self._vault_cli.read(self._nixops_base_secret);
+        res = self._db_file.read(self._nixops_base_secret);
         if res is None:
             initial_db = {
               "schemaVersion": 0,
               "deployments": {}
             }
-            self._vault_cli.write(self._nixops_base_secret,value=initial_db,lease='1h');
+            self._db_file.write(self._nixops_base_secret,value=initial_db,lease='1h');
         
 
     def schema_version(self): #TODO: resolve this after deciding on format for this stuffush
@@ -294,7 +294,7 @@ class VaultState(object):
             depl = self.db.read_depl(deployment_uuid)
             depl_key = state["deployments"].pop(deployment_uuid)
             self.db._deployments.pop(deployment_uuid, None)
-            self.db._vault_cli.delete(depl_key) # deletes the deployment from the vault
+            self.db._db_file.delete(depl_key) # deletes the deployment from the vault
             self.db.set(state)
             
             #TODO: note: this part only removes the secret from the main dataset, the deployment's secret in the vault or in the dict might still exist
