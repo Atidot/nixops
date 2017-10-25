@@ -16,6 +16,10 @@ import time
 
 #- api for locks -#
 
+# in seconds
+read_delay = 10
+write_delay = 5
+
 def initialize_vault_locks(state):
     """Use 2 keys (secrets - A and B) that contains timestamp to manage a (realisticly almost) lock"""
     write_nothing_to_locks(state)
@@ -27,7 +31,7 @@ def clear_vault_locks(state):
     8. Clear A
     """
     
-    write_nothing_to_locks(state,5)
+    write_nothing_to_locks(state,write_delay)
     
 def try_lock_vault_locks(state):
     """
@@ -45,20 +49,20 @@ def try_lock_vault_locks(state):
     """
     lock_A_status = state._db_file.read(state._lock_A)['data']['value']
     if not lock_A_status == '':
-        raise Exception('system is currently locked, please try again later')
-    time.sleep(10)
+        raise Exception('System is currently locked, please try again later')
+    time.sleep(read_delay)
     lock_B_status = state._db_file.read(state._lock_B)['data']['value']
     if not lock_B_status == '':
-        raise Exception('system is currently locked twice, please try again later')
-    time.sleep(10)
+        raise Exception('System is currently locked, please try again later')
+    time.sleep(read_delay)
     first_time_value = int(round(time.time()))
     state._db_file.write(state._lock_A,value=first_time_value,lease='1h')
-    time.sleep(5)
+    time.sleep(write_delay)
     state._db_file.write(state._lock_B,value=int(round(time.time())),lease='1h')
 
     lock_A_status = state._db_file.read(state._lock_A)['data']['value']
     if lock_A_status != first_time_value:
-        raise Exception('someone else is currently using the system. so try again later!!!  goodbye!!!!')
+        raise Exception('System is currently locked, please try again later')
 
 def write_nothing_to_locks(state,wait_time=0): # util function
     state._db_file.write(state._lock_A,value='',lease='1h')
