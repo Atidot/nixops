@@ -46,7 +46,7 @@ def sort_deployments(depls):
 
 def lock_op(op): # this takes action only when there is vault as a backend
     state = nixops.state.open(args.state_url)
-    if state is not nixops.state.vault_file.VaultState:
+    if state is nixops.state.vault_file.VaultState:
         nixops.state.vault_file.try_lock_vault_locks(state.db)
         op()
         nixops.state.vault_file.clear_vault_locks(state.db)
@@ -65,6 +65,7 @@ def one_or_all():
 
 
 def op_list_deployments():
+    print "1"
     state = nixops.state.open(args.state_url)
     tbl = create_table([("UUID", 'l'), ("Name", 'l'), ("Description", 'l'), ("# Machines", 'r'), ("Type", 'c')])
     for depl in sort_deployments(state.get_all_deployments()):
@@ -959,7 +960,6 @@ setup_logging(args)
 
 try:
     nixops.deployment.debug = args.debug
-    #pdb.set_trace()
     lock_op(args.op)
 except deployment.NixEvalError:
     error("evaluation of the deployment specification failed")
