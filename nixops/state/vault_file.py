@@ -17,8 +17,8 @@ import time
 #- api for locks -#
 
 # in seconds
-read_delay = 10
-write_delay = 5
+read_delay = 2
+write_delay = 1
 
 def initialize_vault_locks(state):
     """Use 2 keys (secrets - A and B) that contains timestamp to manage a (realisticly almost) lock"""
@@ -133,7 +133,7 @@ class TransactionalVaultFile:
         fcntl.fcntl(self._lock_file, fcntl.F_SETFD, fcntl.FD_CLOEXEC) # to not keep the lock in child processes
         
         self._root_token = os.environ['VAULT_TOKEN']
-        self._url = os.environ['VAULT_ADDR']
+        self._url = os.environ.get('NIXOPS_STATE_URL')
         self._nixops_base_secret = 'secret/' + os.environ["NIXOPS_SECRET_KEY"]
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
         
