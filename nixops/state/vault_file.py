@@ -12,8 +12,62 @@ import copy
 import hvac
 import code
 from uuid import uuid1 as gen_uuid
+import time
 
 import pdb
+
+#- api for locks -#
+
+
+
+def initialize_vault_locks(state):
+    """Use 2 keys (secrets - A and B) that contains timestamp to manage a (realisticly almost) lock"""
+    write_nothing_to_locks(state)
+
+def clear_vault_locks(state):
+    """
+    6. Clear B
+    7. Wait for (TBD) 5 seconds
+    8. Clear A
+    """
+    
+    write_nothing_to_locks(state,5)
+    
+def try_lock_vault_locks(state):
+    """
+    -- Check locks -
+    1. Read A make sure it is cleared
+    2. Wait for (TBD 2) 10 seconds
+    3. Read B make sure it is cleared
+    4. Wait for (TBD 2) 10 seconds
+    -- Write
+    1. Write current time to A
+    2. Wait for (TBD) 5 seconds
+    3. Write current time to B
+    4. Assert your original time at A, if it has changed exist violently and don't change anything!
+    (shouldn't happen)
+    """
+    lock_A_status = state._db_file.read(state._lock_A)['data']['value']
+    if not lock_A_status == '':
+        raise Exception('system is currently locked, please try again later')
+    time.sleep(10)
+    lock_B_status = state._db_file.read(state._lock_B)['data']['value']
+    if not lock_B_status == '':
+        raise Exception('system is currently locked twice, please try again later')
+    time.sleep(10)
+    first_time_value = int(round(time.time()))
+    state._db_file.write(state._lock_A,value=first_time_value,lease='1h')
+    time.sleep(5)
+    state._db_file.write(state._lock_B,value=int(round(time.time())),lease='1h')
+
+    lock_A_status = state._db_file.read(state._lock_A)['data']['value']
+    if lock_A_status != first_time_value:
+        raise Exception('someone else is currently using the system. so try again later!!!  goodbye!!!!')
+
+def write_nothing_to_locks(state,wait_time=0): # util function
+    state._db_file.write(state._lock_A,value='',lease='1h')
+    time.sleep(wait_time)
+    state._db_file.write(state._lock_B,value='',lease='1h')
 
 #- api for path manipulation -#
 
@@ -95,6 +149,8 @@ class TransactionalVaultFile:
         self.nesting = 0
         self.lock = threading.RLock()
         self._deployments = {}
+        self._lock_A = self._nixops_base_secret + "/lock_A"
+        self._lock_B = self._nixops_base_secret + "/lock_B"
 
         if vault.is_sealed():
             raise Exception('The supplied vault is sealed, please open it manually before running NixOps')
@@ -203,9 +259,9 @@ class TransactionalVaultFile:
               "deployments": {}
             }
             self._db_file.write(self._nixops_base_secret,value=initial_db,lease='1h');
-        
+            initialize_vault_locks(self)
 
-    def schema_version(self): #TODO: resolve this after deciding on format for this stuffush
+    def schema_version(self):
         state = self.read()
         version = state["schemaVersion"]
         if version is None:
