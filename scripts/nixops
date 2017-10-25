@@ -6,6 +6,7 @@ from nixops.nix_expr import py2nix
 from nixops.parallel import MultipleExceptions, run_tasks
 
 import nixops.state.json_file # sqlite3_file
+import nixops.state.vault_file
 import prettytable
 import argparse
 import os
@@ -22,6 +23,7 @@ import logging.handlers
 import syslog
 import json
 import pipes
+
 
 # For 14.04 user convenience.
 import libcloud.security
@@ -42,7 +44,15 @@ def create_table(headers):
 def sort_deployments(depls):
     return sorted(depls, key=lambda depl: (depl.name, depl.uuid))
 
-
+def lock_op(op): # this takes action only when there is vault as a backend
+    state = nixops.state.open(args.state_url)
+    if state is not nixops.state.vault_file.VaultState:
+        nixops.state.vault_file.try_lock_vault_locks(state.db)
+        op()
+        nixops.state.vault_file.clear_vault_locks(state.db)
+    else:
+        op()
+    
 # Handle the --all switch: if --all is given, return all deployments;
 # otherwise, return the deployment specified by -d /
 # $NIXOPS_DEPLOYMENT.
@@ -949,7 +959,8 @@ setup_logging(args)
 
 try:
     nixops.deployment.debug = args.debug
-    args.op()
+    #pdb.set_trace()
+    lock_op(args.op)
 except deployment.NixEvalError:
     error("evaluation of the deployment specification failed")
     sys.exit(1)

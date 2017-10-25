@@ -14,11 +14,7 @@ import code
 from uuid import uuid1 as gen_uuid
 import time
 
-import pdb
-
 #- api for locks -#
-
-
 
 def initialize_vault_locks(state):
     """Use 2 keys (secrets - A and B) that contains timestamp to manage a (realisticly almost) lock"""
