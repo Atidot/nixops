@@ -65,7 +65,6 @@ def one_or_all():
 
 
 def op_list_deployments():
-    print "1"
     state = nixops.state.open(args.state_url)
     tbl = create_table([("UUID", 'l'), ("Name", 'l'), ("Description", 'l'), ("# Machines", 'r'), ("Type", 'c')])
     for depl in sort_deployments(state.get_all_deployments()):
