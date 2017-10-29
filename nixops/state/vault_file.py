@@ -119,11 +119,7 @@ class TransactionalVaultFile:
     # Implementation notes:
     # if self.nesting > 0, then no write will propagate.
     def __init__(self):
-        """Vault should be initialized and unsealed before starting to use nixops.
-           after that, initialize: 
-           1. VAULT_TOKEN to be the vault's root token
-           2. VAULT_KEY to be the vault's unseal key
-           3. VAULT_ADDR to the address of vault (if vault is initialized on the same machine, it is supposed to be set 
+        """Vault should be initialized,configed and unsealed before starting to use nixops.
         """
         # we create lock in ~/nixops/locks/shared-state
         lock_dir = os.path.join(os.environ.get("HOME", ""), ".nixops/locks")
