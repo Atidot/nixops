@@ -56,18 +56,18 @@ def try_lock_vault_locks(state):
         raise Exception('System is currently locked, please try again later')
     time.sleep(read_delay)
     first_time_value = int(round(time.time()))
-    state._db_file.write(state._lock_A,value=first_time_value,lease='1h')
+    state._db_file.write(state._lock_A,value=first_time_value)
     time.sleep(write_delay)
-    state._db_file.write(state._lock_B,value=int(round(time.time())),lease='1h')
+    state._db_file.write(state._lock_B,value=int(round(time.time())))
 
     lock_A_status = state._db_file.read(state._lock_A)['data']['value']
     if lock_A_status != first_time_value:
         raise Exception('System is currently locked, please try again later')
 
 def write_nothing_to_locks(state,wait_time=0): # util function
-    state._db_file.write(state._lock_A,value='',lease='1h')
+    state._db_file.write(state._lock_A,value='')
     time.sleep(wait_time)
-    state._db_file.write(state._lock_B,value='',lease='1h')
+    state._db_file.write(state._lock_B,value='')
 
 #- api for path manipulation -#
 
@@ -136,22 +136,23 @@ class TransactionalVaultFile:
         self._url = os.environ.get('NIXOPS_STATE_URL')
         self._nixops_base_secret = 'secret/' + os.environ["NIXOPS_SECRET_KEY"]
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
-        
+        self._cert = (os.environ["VAULT_CLIENT_CERT"],os.environ["VAULT_CLIENT_KEY"])
         # this part appends '/' to the result, because if it used in concatenation (later) without it, it causes state corruption
         if self._dir_to_strip[-1] != '/':
             self._dir_to_strip += '/'
 
         #TODO: verify vault address before connecting?
         #TODO: this line should be wrapped with an exception and print a message that we need the enviroment variables set correctly
-        vault = hvac.Client(url=self._url, token=self._root_token)
-            
+        #vault = hvac.Client(url=self._url, token=self._root_token)
+        vault = hvac.Client(url=self._url,token=self._root_token)
+                            #,cert=self._cert)
+    
         self._db_file = vault
         self.nesting = 0
         self.lock = threading.RLock()
         self._deployments = {}
         self._lock_A = self._nixops_base_secret + "/lock_A"
         self._lock_B = self._nixops_base_secret + "/lock_B"
-
         if vault.is_sealed():
             raise Exception('The supplied vault is sealed, please open it manually before running NixOps')
         
@@ -179,7 +180,7 @@ class TransactionalVaultFile:
     def commit_depl(self,uuid):
         stripped_depl = strip_depl_paths(self._deployments[uuid],self._dir_to_strip)
         depl_key = self._nixops_base_secret + "/" + uuid
-        self._db_file.write(depl_key,value=stripped_depl,lease='1h')    
+        self._db_file.write(depl_key,value=stripped_depl)    
         
 
     def read_all_depls(self):
@@ -241,7 +242,7 @@ class TransactionalVaultFile:
 
     def _commit(self):
         assert self.nesting == 0
-        self._db_file.write(self._nixops_base_secret,value=self._current_state,lease='1h')
+        self._db_file.write(self._nixops_base_secret,value=self._current_state)
 
         #commit also the deployments:
         for uuid in self._deployments:
@@ -258,7 +259,7 @@ class TransactionalVaultFile:
               "schemaVersion": 0,
               "deployments": {}
             }
-            self._db_file.write(self._nixops_base_secret,value=initial_db,lease='1h');
+            self._db_file.write(self._nixops_base_secret,value=initial_db);
             initialize_vault_locks(self)
 
     def schema_version(self):
