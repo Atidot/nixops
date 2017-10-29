@@ -136,17 +136,15 @@ class TransactionalVaultFile:
         self._url = os.environ.get('NIXOPS_STATE_URL')
         self._nixops_base_secret = 'secret/' + os.environ["NIXOPS_SECRET_KEY"]
         self._dir_to_strip = os.environ["NIXOPS_DIR_TO_STRIP"]
-        self._cert = (os.environ["VAULT_CLIENT_CERT"],os.environ["VAULT_CLIENT_KEY"])
         # this part appends '/' to the result, because if it used in concatenation (later) without it, it causes state corruption
         if self._dir_to_strip[-1] != '/':
             self._dir_to_strip += '/'
 
-        #TODO: verify vault address before connecting?
-        #TODO: this line should be wrapped with an exception and print a message that we need the enviroment variables set correctly
-        #vault = hvac.Client(url=self._url, token=self._root_token)
-        vault = hvac.Client(url=self._url,token=self._root_token)
-                            #,cert=self._cert)
-    
+        #TODO: this line should be wrapped with an exception and print a message that we need the enviroment variables set correctly        
+        # also works when tls_disabled is on
+        self._cert = (os.environ.get("VAULT_CLIENT_CERT"),os.environ.get("VAULT_CLIENT_KEY"))
+        vault = hvac.Client(url=self._url,token=self._root_token,cert=self._cert)
+            
         self._db_file = vault
         self.nesting = 0
         self.lock = threading.RLock()
