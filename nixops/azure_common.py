@@ -272,10 +272,18 @@ class ResourceState(nixops.resources.ResourceState):
                 token = self.tokens[token_id]
             else:
                 try:
-                    auth_func = (adal.acquire_token_with_client_credentials if self.is_service_principal else
-                                 adal.acquire_token_with_username_password)
-                    token = auth_func(str(self.authority_url),
-                                      str(self.user), str(self.password))
+                    auth_context = adal.authentication_context.AuthenticationContext(self.authority_url,validate_authority=False)
+                    auth_func = (auth_context.acquire_token_with_client_credentials if self.is_service_principal else
+                                 auth_context.acquire_token_with_username_password)
+                    #print "-----------------------args-------------------------- "
+                    #print "authority_url",self.authority_url
+                    #print "user",self.user
+                    #print "password",self.password
+                    #print "resource",os.environ['AZURE_RESOURCE']
+                    #print "-----------------------args-------------------------- "
+                    # token = auth_func(str(resource),
+                    #                   str(self.user), str(self.password))
+                    token = auth_func(resource=os.environ['AZURE_RESOURCE'],client_id=self.user,client_secret=self.password)
                 except Exception as e:
                     e.args = ("Auth failure: {0}".format(e.args[0]),) + e.args[1:] 
                     raise
